@@ -1,0 +1,6 @@
+{
+  "name": "TaskFlow",
+  "description": "Smart TODO List and task management web application with dashboard analytics, search, filtering, sorting, and full-stack MongoDB CRUD API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
