@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, Menu, Plus, RefreshCw } from 'lucide-react';
 import {
@@ -18,6 +18,7 @@ import type {
   SortField,
   SortOrder,
   Task,
+  TaskNotification,
   TaskStatusFilter,
   UpdateTaskInput,
   UserSettings,
@@ -27,6 +28,12 @@ import { Sidebar } from './components/Sidebar.tsx';
 import { TaskModal } from './components/TaskModal.tsx';
 import { ConfirmDialog } from './components/ConfirmDialog.tsx';
 import { ToastContainer, type ToastItem } from './components/ToastContainer.tsx';
+import { NotificationCenter } from './components/NotificationCenter.tsx';
+import {
+  checkTaskAlert,
+  playAlertSound,
+  showBrowserNotification,
+} from './utils/notificationService.ts';
 import { DashboardPage } from './pages/DashboardPage.tsx';
 import { AllTasksPage } from './pages/AllTasksPage.tsx';
 import { CompletedTasksPage } from './pages/CompletedTasksPage.tsx';
@@ -38,6 +45,10 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   role: 'Product Manager',
   defaultPriority: 'medium',
   defaultCategory: 'Work',
+  notificationsEnabled: true,
+  alertTiming: '15m',
+  alertOverdue: true,
+  soundEnabled: true,
   updatedAt: new Date().toISOString(),
 };
 
@@ -81,6 +92,9 @@ export default function App() {
   const [clearCompletedOpen, setClearCompletedOpen] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [notifications, setNotifications] = useState<TaskNotification[]>([]);
+  const firedAlertsRef = useRef<Set<string>>(new Set());
+  const readAlertIdsRef = useRef<Set<string>>(new Set());
 
   const pushToast = useCallback(
     (type: ToastItem['type'], title: string, description?: string) => {
@@ -96,6 +110,78 @@ export default function App() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((item) => item.id !== id));
   }, []);
+
+  // Periodic alert evaluation
+  useEffect(() => {
+    if (settings.notificationsEnabled === false) {
+      setNotifications([]);
+      return;
+    }
+
+    const evaluateAlerts = () => {
+      const now = new Date();
+      const activeList: TaskNotification[] = [];
+
+      for (const task of tasks) {
+        if (task.completed || !task.dueDate) continue;
+
+        const alert = checkTaskAlert(task, settings, now);
+        if (!alert) continue;
+
+        const notificationId = `${task._id}-${alert.type}`;
+        const isRead = readAlertIdsRef.current.has(notificationId);
+
+        activeList.push({
+          id: notificationId,
+          taskId: task._id,
+          taskTitle: task.title,
+          type: alert.type,
+          message: alert.message,
+          dueDate: alert.dueDate,
+          timestamp: Date.now(),
+          read: isRead,
+        });
+
+        // Trigger sound, toast and browser notification once per event
+        const eventKey = `${notificationId}-${task.dueDate}`;
+        if (!firedAlertsRef.current.has(eventKey)) {
+          firedAlertsRef.current.add(eventKey);
+
+          if (settings.soundEnabled !== false) {
+            playAlertSound();
+          }
+
+          pushToast(
+            alert.type === 'overdue' ? 'error' : 'info',
+            `Task Alert: ${task.title}`,
+            alert.message
+          );
+
+          showBrowserNotification(`Task Alert: ${task.title}`, {
+            body: alert.message,
+          });
+        }
+      }
+
+      setNotifications(activeList);
+    };
+
+    evaluateAlerts();
+    const timer = window.setInterval(evaluateAlerts, 15000);
+    return () => window.clearInterval(timer);
+  }, [tasks, settings, pushToast]);
+
+  const handleMarkNotificationAsRead = useCallback((id: string) => {
+    readAlertIdsRef.current.add(id);
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+  }, []);
+
+  const handleMarkAllNotificationsAsRead = useCallback(() => {
+    notifications.forEach((n) => readAlertIdsRef.current.add(n.id));
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }, [notifications]);
 
   // Theme sync with <html> class and localStorage
   const applyTheme = useCallback((nextTheme: 'light' | 'dark') => {
@@ -319,14 +405,29 @@ export default function App() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={openNewTaskModal}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 shadow-xs transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-            <span>New Task</span>
-          </button>
+          <div className="flex items-center gap-2.5">
+            <NotificationCenter
+              notifications={notifications}
+              tasks={tasks}
+              settings={settings}
+              onMarkAsRead={handleMarkNotificationAsRead}
+              onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+              onSelectTask={(task) => {
+                setEditingTask(task);
+                setTaskModalOpen(true);
+              }}
+              onNavigateToSettings={() => setActivePage('settings')}
+            />
+
+            <button
+              type="button"
+              onClick={openNewTaskModal}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 shadow-xs transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              <span>New Task</span>
+            </button>
+          </div>
         </header>
 
         {/* Main viewport */}

@@ -1,10 +1,28 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Check, Loader2, Moon, Sun, Trash2 } from 'lucide-react';
 import {
+  Bell,
+  Check,
+  Clock,
+  Loader2,
+  Moon,
+  ShieldCheck,
+  Sun,
+  Trash2,
+  Volume2,
+} from 'lucide-react';
+import {
+  ALERT_TIMING_OPTIONS,
   DEFAULT_CATEGORIES,
+  type AlertTiming,
   type Priority,
   type UserSettings,
 } from '../types/task.ts';
+import {
+  getBrowserNotificationPermission,
+  playAlertSound,
+  requestBrowserNotificationPermission,
+  showBrowserNotification,
+} from '../utils/notificationService.ts';
 
 interface SettingsPageProps {
   theme: 'light' | 'dark';
@@ -28,7 +46,23 @@ export function SettingsPage({
   const [role, setRole] = useState(settings.role);
   const [defaultPriority, setDefaultPriority] = useState<Priority>(settings.defaultPriority);
   const [defaultCategory, setDefaultCategory] = useState(settings.defaultCategory);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    settings.notificationsEnabled ?? true
+  );
+  const [alertTiming, setAlertTiming] = useState<AlertTiming>(
+    settings.alertTiming ?? '15m'
+  );
+  const [alertOverdue, setAlertOverdue] = useState(
+    settings.alertOverdue ?? true
+  );
+  const [soundEnabled, setSoundEnabled] = useState(
+    settings.soundEnabled ?? true
+  );
+  const [browserPermission, setBrowserPermission] = useState(
+    getBrowserNotificationPermission()
+  );
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,6 +71,10 @@ export function SettingsPage({
     setRole(settings.role);
     setDefaultPriority(settings.defaultPriority);
     setDefaultCategory(settings.defaultCategory);
+    setNotificationsEnabled(settings.notificationsEnabled ?? true);
+    setAlertTiming(settings.alertTiming ?? '15m');
+    setAlertOverdue(settings.alertOverdue ?? true);
+    setSoundEnabled(settings.soundEnabled ?? true);
   }, [settings]);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -48,6 +86,7 @@ export function SettingsPage({
     }
     setError(null);
     setSaving(true);
+    setSaveSuccess(false);
     try {
       await onSaveSettings({
         displayName: trimmedName,
@@ -55,11 +94,27 @@ export function SettingsPage({
         role: role.trim(),
         defaultPriority,
         defaultCategory: defaultCategory.trim() || 'Work',
+        notificationsEnabled,
+        alertTiming,
+        alertOverdue,
+        soundEnabled,
       });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save profile settings.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRequestPermission = async () => {
+    const res = await requestBrowserNotificationPermission();
+    setBrowserPermission(res);
+    if (res === 'granted') {
+      showBrowserNotification('TaskFlow Notifications Enabled', {
+        body: 'You will receive desktop alerts when tasks are due!',
+      });
     }
   };
 
@@ -256,7 +311,151 @@ export function SettingsPage({
             </div>
           </div>
 
-          <div className="pt-2 flex justify-end">
+          {/* Notification & Alert Preferences */}
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2 mb-3">
+              <Bell className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Task Alerts & Notifications
+              </h3>
+            </div>
+
+            {/* Master Toggle */}
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 mb-4">
+              <div>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  Enable Task Due Alerts
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Receive in-app alerts and notifications when scheduled tasks are approaching
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notificationsEnabled}
+                  onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            {notificationsEnabled && (
+              <div className="space-y-4 pl-1">
+                {/* When to Alert */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      htmlFor="settings-alert-timing"
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                    >
+                      Default Alert Timing
+                    </label>
+                    <select
+                      id="settings-alert-timing"
+                      value={alertTiming}
+                      onChange={(e) => setAlertTiming(e.target.value as AlertTiming)}
+                      className="w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    >
+                      {ALERT_TIMING_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      When TaskFlow should notify you before a task is due.
+                    </p>
+                  </div>
+
+                  {/* Overdue alert toggle */}
+                  <div>
+                    <span className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Overdue Reminders
+                    </span>
+                    <label className="flex items-center gap-2.5 p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={alertOverdue}
+                        onChange={(e) => setAlertOverdue(e.target.checked)}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-300">
+                        Alert when tasks pass due date
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Sound and Desktop Notification row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  {/* Sound alert */}
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className="w-4 h-4 text-slate-500" />
+                      <div>
+                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                          Chime Sound
+                        </p>
+                        <p className="text-[11px] text-slate-500">Play tone on alert</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={playAlertSound}
+                        className="px-2 py-1 text-xs rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+                      >
+                        Test
+                      </button>
+                      <input
+                        type="checkbox"
+                        checked={soundEnabled}
+                        onChange={(e) => setSoundEnabled(e.target.checked)}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Desktop Browser Notification */}
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-slate-500" />
+                      <div>
+                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                          Desktop Alerts
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Status:{' '}
+                          <span className="font-medium capitalize text-indigo-600 dark:text-indigo-400">
+                            {browserPermission}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRequestPermission}
+                      className="px-2.5 py-1 text-xs font-medium rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors"
+                    >
+                      {browserPermission === 'granted' ? 'Send Test' : 'Enable'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 flex items-center justify-between">
+            {saveSuccess ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                <Check className="w-3.5 h-3.5" />
+                Settings saved successfully!
+              </span>
+            ) : (
+              <span />
+            )}
             <button
               type="submit"
               disabled={saving}

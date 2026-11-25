@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Calendar, Flag, Loader2, X } from 'lucide-react';
+import { Bell, Calendar, Flag, Loader2, X } from 'lucide-react';
 import {
   DEFAULT_CATEGORIES,
+  type AlertTiming,
   type CreateTaskInput,
   type Priority,
   type Task,
@@ -59,6 +60,7 @@ export function TaskModal({
   const [priority, setPriority] = useState<Priority>(defaultPriority);
   const [category, setCategory] = useState(defaultCategory);
   const [dueDateInput, setDueDateInput] = useState('');
+  const [reminderTiming, setReminderTiming] = useState<AlertTiming | 'default'>('default');
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -73,6 +75,7 @@ export function TaskModal({
       setPriority(editingTask.priority);
       setCategory(editingTask.category);
       setDueDateInput(toDateInputValue(editingTask.dueDate));
+      setReminderTiming(editingTask.reminderTiming ?? 'default');
       setCompleted(editingTask.completed);
     } else {
       setTitle('');
@@ -80,6 +83,7 @@ export function TaskModal({
       setPriority(defaultPriority);
       setCategory(defaultCategory || 'Work');
       setDueDateInput('');
+      setReminderTiming('default');
       setCompleted(false);
     }
     setError(null);
@@ -122,6 +126,7 @@ export function TaskModal({
         priority,
         category: category.trim() || 'General',
         dueDate: fromDateInputValue(dueDateInput),
+        reminderTiming,
         ...(editingTask ? { completed } : {}),
       };
       await onSubmit(payload, editingTask?._id);
@@ -338,6 +343,38 @@ export function TaskModal({
                   </datalist>
                 </div>
               </div>
+
+              {/* Task Alert / Reminder Setting */}
+              {dueDateInput && (
+                <div className="rounded-lg bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 p-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <label
+                      htmlFor="task-reminder-timing"
+                      className="flex items-center gap-1.5 text-xs font-semibold text-indigo-950 dark:text-indigo-200"
+                    >
+                      <Bell className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+                      Alert Reminder
+                    </label>
+                    <select
+                      id="task-reminder-timing"
+                      value={reminderTiming}
+                      onChange={(e) => setReminderTiming(e.target.value as AlertTiming | 'default')}
+                      className="rounded-md bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="default">Use Workspace Default</option>
+                      <option value="at_due">At due time</option>
+                      <option value="15m">15 minutes before</option>
+                      <option value="30m">30 minutes before</option>
+                      <option value="1h">1 hour before</option>
+                      <option value="1d">1 day before</option>
+                      <option value="never">Do not alert</option>
+                    </select>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Choose when TaskFlow should send you an alert notification for this task.
+                  </p>
+                </div>
+              )}
 
               {editingTask && (
                 <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">

@@ -9,6 +9,7 @@ create table if not exists public.tasks (
   priority text not null default 'medium' check (priority in ('low', 'medium', 'high')),
   category text not null default 'General' check (char_length(category) <= 60),
   due_date timestamptz,
+  reminder_timing text not null default 'default' check (reminder_timing in ('default', 'at_due', '15m', '30m', '1h', '1d', 'never')),
   completed boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -28,6 +29,10 @@ create table if not exists public.settings (
   role text not null default 'Product Manager' check (char_length(role) <= 80),
   default_priority text not null default 'medium' check (default_priority in ('low', 'medium', 'high')),
   default_category text not null default 'Work' check (char_length(default_category) <= 60),
+  notifications_enabled boolean not null default true,
+  alert_timing text not null default '15m' check (alert_timing in ('at_due', '15m', '30m', '1h', '1d', 'never')),
+  alert_overdue boolean not null default true,
+  sound_enabled boolean not null default true,
   updated_at timestamptz not null default now()
 );
 

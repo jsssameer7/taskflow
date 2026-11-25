@@ -1,4 +1,4 @@
-import type { Priority, SortField, SortOrder, TaskStatusFilter } from '../src/types/task.ts';
+import type { AlertTiming, Priority, SortField, SortOrder, TaskStatusFilter } from '../src/types/task.ts';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -6,6 +6,16 @@ const PRIORITIES: readonly Priority[] = ['low', 'medium', 'high'];
 const STATUSES: readonly TaskStatusFilter[] = ['all', 'pending', 'completed', 'overdue'];
 const SORT_FIELDS: readonly SortField[] = ['dueDate', 'createdAt', 'priority'];
 const SORT_ORDERS: readonly SortOrder[] = ['asc', 'desc'];
+const ALERT_TIMINGS: readonly AlertTiming[] = ['at_due', '15m', '30m', '1h', '1d', 'never'];
+const REMINDER_TIMINGS: readonly (AlertTiming | 'default')[] = [
+  'default',
+  'at_due',
+  '15m',
+  '30m',
+  '1h',
+  '1d',
+  'never',
+];
 
 export class ValidationError extends Error {
   statusCode: number;
@@ -113,11 +123,20 @@ export function validateCreateTaskBody(body: unknown) {
     errors.push((err as Error).message);
   }
 
+  let reminderTiming: AlertTiming | 'default' = 'default';
+  if (raw.reminderTiming !== undefined && raw.reminderTiming !== null && raw.reminderTiming !== '') {
+    if (typeof raw.reminderTiming !== 'string' || !REMINDER_TIMINGS.includes(raw.reminderTiming as AlertTiming | 'default')) {
+      errors.push('Reminder timing must be one of: default, at_due, 15m, 30m, 1h, 1d, never.');
+    } else {
+      reminderTiming = raw.reminderTiming as AlertTiming | 'default';
+    }
+  }
+
   if (errors.length > 0) {
     throw new ValidationError(errors[0], errors, 400);
   }
 
-  return { title, description, priority, category, dueDate };
+  return { title, description, priority, category, dueDate, reminderTiming };
 }
 
 export function validateUpdateTaskBody(body: unknown) {
@@ -132,6 +151,7 @@ export function validateUpdateTaskBody(body: unknown) {
     priority?: Priority;
     category?: string;
     dueDate?: string | null;
+    reminderTiming?: AlertTiming | 'default';
     completed?: boolean;
   } = {};
 
@@ -180,6 +200,18 @@ export function validateUpdateTaskBody(body: unknown) {
       patch.dueDate = parseDueDate(raw.dueDate);
     } catch (err) {
       errors.push((err as Error).message);
+    }
+  }
+
+  if ('reminderTiming' in raw) {
+    if (
+      raw.reminderTiming !== null &&
+      (typeof raw.reminderTiming !== 'string' ||
+        !REMINDER_TIMINGS.includes(raw.reminderTiming as AlertTiming | 'default'))
+    ) {
+      errors.push('Reminder timing must be one of: default, at_due, 15m, 30m, 1h, 1d, never.');
+    } else {
+      patch.reminderTiming = (raw.reminderTiming as AlertTiming | 'default') ?? 'default';
     }
   }
 
@@ -264,11 +296,35 @@ export function validateSettingsBody(body: unknown) {
       ? raw.defaultCategory.trim().slice(0, 60)
       : 'Work';
 
+  const notificationsEnabled =
+    typeof raw.notificationsEnabled === 'boolean' ? raw.notificationsEnabled : true;
+
+  const alertTiming: AlertTiming =
+    typeof raw.alertTiming === 'string' && ALERT_TIMINGS.includes(raw.alertTiming as AlertTiming)
+      ? (raw.alertTiming as AlertTiming)
+      : '15m';
+
+  const alertOverdue =
+    typeof raw.alertOverdue === 'boolean' ? raw.alertOverdue : true;
+
+  const soundEnabled =
+    typeof raw.soundEnabled === 'boolean' ? raw.soundEnabled : true;
+
   if (errors.length > 0) {
     throw new ValidationError(errors[0], errors, 400);
   }
 
-  return { displayName, email, role, defaultPriority, defaultCategory };
+  return {
+    displayName,
+    email,
+    role,
+    defaultPriority,
+    defaultCategory,
+    notificationsEnabled,
+    alertTiming,
+    alertOverdue,
+    soundEnabled,
+  };
 }
 
 export function escapeRegex(text: string): string {

@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from './supabase.ts';
 import type {
+  AlertTiming,
   CreateTaskInput,
   Priority,
   SortField,
@@ -21,6 +22,7 @@ interface SupabaseTaskRow {
   priority: Priority;
   category: string | null;
   due_date: string | null;
+  reminder_timing?: string | null;
   completed: boolean;
   created_at: string;
   updated_at: string;
@@ -33,6 +35,10 @@ interface SupabaseSettingsRow {
   role: string;
   default_priority: Priority;
   default_category: string;
+  notifications_enabled?: boolean | null;
+  alert_timing?: string | null;
+  alert_overdue?: boolean | null;
+  sound_enabled?: boolean | null;
   updated_at: string;
 }
 
@@ -59,6 +65,10 @@ const DEFAULT_SETTINGS: UserSettings = {
   role: 'Product Manager',
   defaultPriority: 'medium',
   defaultCategory: 'Work',
+  notificationsEnabled: true,
+  alertTiming: '15m',
+  alertOverdue: true,
+  soundEnabled: true,
   updatedAt: new Date().toISOString(),
 };
 
@@ -79,6 +89,7 @@ function serializeSupabaseTask(row: SupabaseTaskRow): Task {
     priority: row.priority,
     category: row.category || 'General',
     dueDate: row.due_date ?? null,
+    reminderTiming: (row.reminder_timing as AlertTiming | 'default') || 'default',
     completed: Boolean(row.completed),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -92,6 +103,10 @@ function serializeSupabaseSettings(row: SupabaseSettingsRow): UserSettings {
     role: row.role,
     defaultPriority: row.default_priority,
     defaultCategory: row.default_category,
+    notificationsEnabled: row.notifications_enabled ?? true,
+    alertTiming: (row.alert_timing as AlertTiming) || '15m',
+    alertOverdue: row.alert_overdue ?? true,
+    soundEnabled: row.sound_enabled ?? true,
     updatedAt: row.updated_at,
   };
 }
@@ -197,13 +212,26 @@ async function atomicWriteStore(data: LocalStoreData): Promise<void> {
 export async function initializeDatabase(): Promise<void> {
   supabase = getSupabaseClient();
   if (supabase) {
-    console.log('[TaskFlow] Supabase client initialized from environment variables.');
-    return;
+    try {
+      const { error } = await supabase.from('tasks').select('id').limit(1);
+      if (error) {
+        console.warn(
+          `[TaskFlow Supabase] Check failed (${error.message}). Falling back to local store at data/taskflow-store.json.`
+        );
+        supabase = null;
+      } else {
+        console.log('[TaskFlow] Supabase client initialized and connected successfully.');
+        return;
+      }
+    } catch (err) {
+      console.warn('[TaskFlow Supabase] Connection error. Falling back to local store.', err);
+      supabase = null;
+    }
   }
 
   await ensureLocalStore();
   console.log(
-    '[TaskFlow] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — using local persistent disk store at data/taskflow-store.json'
+    '[TaskFlow] Local persistent disk store ready at data/taskflow-store.json'
   );
 }
 
@@ -273,6 +301,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
         priority: input.priority,
         category: input.category || 'General',
         due_date: input.dueDate ?? null,
+        reminder_timing: input.reminderTiming ?? 'default',
         completed: false,
       })
       .select('*')
@@ -294,6 +323,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
     priority: input.priority,
     category: input.category || 'General',
     dueDate: input.dueDate ?? null,
+    reminderTiming: input.reminderTiming ?? 'default',
     completed: false,
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -313,6 +343,7 @@ export async function updateTask(id: string, patch: UpdateTaskInput): Promise<Ta
     if (patch.priority !== undefined) updatePayload.priority = patch.priority;
     if (patch.category !== undefined) updatePayload.category = patch.category;
     if (patch.dueDate !== undefined) updatePayload.due_date = patch.dueDate;
+    if (patch.reminderTiming !== undefined) updatePayload.reminder_timing = patch.reminderTiming;
     if (patch.completed !== undefined) updatePayload.completed = patch.completed;
 
     const { data, error } = await supabase
@@ -341,6 +372,7 @@ export async function updateTask(id: string, patch: UpdateTaskInput): Promise<Ta
     ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
     ...(patch.category !== undefined ? { category: patch.category } : {}),
     ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate } : {}),
+    ...(patch.reminderTiming !== undefined ? { reminderTiming: patch.reminderTiming } : {}),
     ...(patch.completed !== undefined ? { completed: patch.completed } : {}),
     updatedAt: new Date().toISOString(),
   };
@@ -499,6 +531,10 @@ export async function updateSettings(
           role: input.role,
           default_priority: input.defaultPriority,
           default_category: input.defaultCategory,
+          notifications_enabled: input.notificationsEnabled ?? true,
+          alert_timing: input.alertTiming ?? '15m',
+          alert_overdue: input.alertOverdue ?? true,
+          sound_enabled: input.soundEnabled ?? true,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'key' }
@@ -516,6 +552,10 @@ export async function updateSettings(
   const store = await ensureLocalStore();
   const updated: UserSettings = {
     ...input,
+    notificationsEnabled: input.notificationsEnabled ?? true,
+    alertTiming: input.alertTiming ?? '15m',
+    alertOverdue: input.alertOverdue ?? true,
+    soundEnabled: input.soundEnabled ?? true,
     updatedAt: new Date().toISOString(),
   };
   store.settings = updated;
